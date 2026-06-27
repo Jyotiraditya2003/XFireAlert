@@ -18,38 +18,40 @@ def predict_risk(weather_dict):
     return float(probability)
 
 def explain_risk(weather_dict):
+    # Ensure a completely fresh data frame is built directly from the UI input
     df = pd.DataFrame([weather_dict])
     df = df[FEATURES]
 
-    # 1. Extract the final model (XGBoost is always the last step)
+    # 1. Extract the final XGBoost model
     xgb_model = pipeline.steps[-1][1]
 
-    # 2. THE BULLETPROOF TRANSFORMATION
-    # This automatically applies all scalers/imputers, regardless of what they are named
+    # 2. Complete the step-wise transformations cleanly
     if len(pipeline.steps) > 1:
         X_transformed = pipeline[:-1].transform(df)
     else:
         X_transformed = df
 
-    # 3. Calculate SHAP on the correctly transformed data
-    explainer = shap.TreeExplainer(xgb_model)
-    shap_values = explainer.shap_values(X_transformed)
-
-    # 4. Safely extract the values for this specific prediction
-    if isinstance(shap_values, list):
-        # Multi-class format
-        values = shap_values[1][0] 
+    # 3. Native XGBoost SHAP calculation bypasses library wrapper discrepancies
+    import xgboost as xgb
+    
+    # Check if the transformed input is a DataFrame or a Numpy Array
+    if isinstance(X_transformed, pd.DataFrame):
+        dmatrix = xgb.DMatrix(X_transformed)
     else:
-        # Binary or Regression format
-        if len(shap_values.shape) == 3: 
-             values = shap_values[0, :, 1]
-        else:
-             values = shap_values[0]
+        # If transformers dropped column names, re-assign them to map shapes correctly
+        dmatrix = xgb.DMatrix(pd.DataFrame(X_transformed, columns=FEATURES))
+        
+    # Native tree booster yields an exact instance contribution array: [features + 1 bias value]
+    booster = xgb_model.get_booster()
+    native_shap = booster.predict(dmatrix, pred_contribs=True)[0]
+    
+    # Extract feature values, leaving out the final array bias term
+    values = native_shap[:-1]
 
-    # 5. Map back to dictionary
+    # 4. Explicit dictionary mapping
     contributions = {f: float(v) for f, v in zip(FEATURES, values)}
     
-    # Sort by absolute magnitude so the UI shows the most impactful items first
+    # Sort by absolute magnitude so the UI highlights shifting values
     contributions = dict(
         sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
     )
