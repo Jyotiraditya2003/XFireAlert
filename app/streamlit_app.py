@@ -51,6 +51,7 @@ sys.path.insert(0, str(SRC_PATH))
 
 # --- IMPORT PIPELINES ---
 from risk_pipeline import predict_risk, explain_risk
+from risk_pipeline import FEATURES
 from image_pipeline import predict_image, generate_gradcam, classify_fire
 from vgg_pipeline import predict_vgg
 from vgg_gradcam import generate_vgg_gradcam
@@ -186,7 +187,17 @@ with tab1:
         # DETAILED RESULTS DASHBOARD (VERTICAL FLOW)
         # ==========================================
         
-        st.success(f"**SYSTEM DECISION: {alert}**")
+        if alert == "CRITICAL":
+            st.error(f"SYSTEM DECISION: {alert}")
+
+        elif alert == "DANGER":
+            st.warning(f"SYSTEM DECISION: {alert}")
+
+        elif alert == "HIGH":
+            st.info(f"SYSTEM DECISION: {alert}")
+
+        else:
+            st.success(f"SYSTEM DECISION: {alert}")
 
         with st.container(border=True):
             st.subheader("Global Risk Assessment")
@@ -265,7 +276,7 @@ with tab1:
                         st.error(f"**{human_name}** is pushing the fire risk UP.")
                 
                 with h_col2:
-                    st.markdown("**Mitigating Factors**")
+                    st.markdown("**Factors Reducing Fire Risk**")
                     if not safe_factors:
                         st.write("No mitigating weather conditions right now.")
                     for feat, val in safe_factors:
@@ -358,27 +369,37 @@ with tab3:
                 st.metric("Low Risk", stats["low_alerts"])
             
             st.markdown("---")
-        
-        st.subheader("Recent Alerts")
-        
-        alerts = get_all_alerts(limit=50)
-        
-        if alerts:
-            df = pd.DataFrame(alerts)
-            df = df[["timestamp", "alert_level", "final_probability", "weather_risk", "vision_confidence"]]
-            df.columns = ["Timestamp", "Alert Level", "Final Prob", "Weather Risk", "Vision Conf"]
-            df["Timestamp"] = pd.to_datetime(df["Timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-            
-            def color_alert(val):
-                if val == "HIGH ALERT":
-                    return "background-color: #ff4b4b; color: white"
-                elif val == "MODERATE WARNING":
-                    return "background-color: #ffa500; color: black"
-                elif val == "LOW RISK":
-                    return "background-color: #00ff00; color: black"
-                return ""
-            
-            styled_df = df.style.applymap(color_alert, subset=["Alert Level"])
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No alerts recorded yet. Run an analysis to create your first alert.")
+
+            st.subheader("Recent Alerts")
+
+            if DB_AVAILABLE:
+                alerts = get_all_alerts(limit=50)
+                if alerts:
+                    df = pd.DataFrame(alerts)
+                    
+                    # Verify if column exists before proceeding
+                    target_col = "alert_level"
+                    if target_col in df.columns:
+                        
+                        # Function to apply colors
+                        def color_alert(val):
+                            if val == "CRITICAL":
+                                return "background-color: #8B0000; color: white"
+                            elif val == "DANGER":
+                                return "background-color: #FF4500; color: white"
+                            elif val == "HIGH":
+                                return "background-color: #FFD700; color: black"
+                            elif val == "NORMAL":
+                                return "background-color: #32CD32; color: white"
+                            return ""
+                        
+                        # Use .map() for Pandas Styler (Standard for versions 2.1+)
+                        styled_df = df.style.map(color_alert, subset=[target_col])
+                        
+                        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.error(f"Column '{target_col}' not found. Available columns: {list(df.columns)}")
+                else:
+                    st.info("No alert records found in database.")
+            else:
+                st.write("Database connection is not available.")

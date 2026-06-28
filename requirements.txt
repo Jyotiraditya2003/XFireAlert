@@ -15,3 +15,4 @@ seaborn
 pymongo
 python-dotenv
 dnspython
+dotenv

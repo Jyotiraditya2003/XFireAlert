@@ -3,57 +3,57 @@ import pandas as pd
 import joblib
 import shap
 
-# Ensuring environment compatibility using os.path
+# --- PATH CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PIPELINE_PATH = os.path.join(BASE_DIR, "models", "risk_pipeline.pkl")
 FEATURE_PATH = os.path.join(BASE_DIR, "models", "feature_names.pkl")
 
+# --- LOAD GLOBALLY ---
 pipeline = joblib.load(PIPELINE_PATH)
 FEATURES = joblib.load(FEATURE_PATH)
 
 def predict_risk(weather_dict):
+    """Predicts the final fire probability score."""
     df = pd.DataFrame([weather_dict])
+    # Enforce exact column order from training
     df = df[FEATURES]
+    
     probability = pipeline.predict_proba(df)[0][1]
     return float(probability)
 
 def explain_risk(weather_dict):
-    # Ensure a completely fresh data frame is built directly from the UI input
+    """Generates dynamic SHAP values for the given weather input."""
     df = pd.DataFrame([weather_dict])
     df = df[FEATURES]
 
-    # 1. Extract the final XGBoost model
-    xgb_model = pipeline.steps[-1][1]
+    # 1. Manually separate the scaler and the model from the pipeline
+    scaler = pipeline.named_steps["scaler"]
+    xgb_model = pipeline.named_steps["model"]
 
-    # 2. Complete the step-wise transformations cleanly
-    if len(pipeline.steps) > 1:
-        X_transformed = pipeline[:-1].transform(df)
+    # 2. Transform the raw UI data through the scaler
+    X_scaled = scaler.transform(df)
+
+    # 3. Create the Explainer directly on the XGBoost model
+    explainer = shap.TreeExplainer(xgb_model)
+    shap_values = explainer.shap_values(X_scaled)
+
+    # 4. Safely extract the 1D array of feature impacts
+    if isinstance(shap_values, list):
+        # Legacy SHAP format [class_0_array, class_1_array]
+        vals = shap_values[1][0]
+    elif len(shap_values.shape) == 3:
+        # 3D SHAP format (n_samples, n_features, n_classes)
+        vals = shap_values[0, :, 1]
+    elif len(shap_values.shape) == 2:
+        # Standard format (n_samples, n_features)
+        vals = shap_values[0]
     else:
-        X_transformed = df
+        vals = shap_values
 
-    # 3. Native XGBoost SHAP calculation bypasses library wrapper discrepancies
-    import xgboost as xgb
+    # 5. Map the values back to their feature names
+    contributions = {feat: float(val) for feat, val in zip(FEATURES, vals)}
     
-    # Check if the transformed input is a DataFrame or a Numpy Array
-    if isinstance(X_transformed, pd.DataFrame):
-        dmatrix = xgb.DMatrix(X_transformed)
-    else:
-        # If transformers dropped column names, re-assign them to map shapes correctly
-        dmatrix = xgb.DMatrix(pd.DataFrame(X_transformed, columns=FEATURES))
-        
-    # Native tree booster yields an exact instance contribution array: [features + 1 bias value]
-    booster = xgb_model.get_booster()
-    native_shap = booster.predict(dmatrix, pred_contribs=True)[0]
-    
-    # Extract feature values, leaving out the final array bias term
-    values = native_shap[:-1]
-
-    # 4. Explicit dictionary mapping
-    contributions = {f: float(v) for f, v in zip(FEATURES, values)}
-    
-    # Sort by absolute magnitude so the UI highlights shifting values
-    contributions = dict(
-        sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
-    )
+    # Sort from highest absolute impact to lowest
+    contributions = dict(sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True))
 
     return contributions
