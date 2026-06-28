@@ -1,0 +1,17 @@
+streamlit
+plotly
+xgboost
+pandas
+numpy
+pillow
+scikit-learn
+joblib
+tensorflow
+opencv-python
+ultralytics
+shap
+matplotlib
+seaborn
+pymongo
+python-dotenv
+dnspython

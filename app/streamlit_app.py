@@ -56,7 +56,7 @@ from vgg_pipeline import predict_vgg
 from vgg_gradcam import generate_vgg_gradcam
 from yolo_pipeline import detect_fire
 from fusion_engine import fuse_predictions, get_alert_level
-from database import log_alert
+from database import log_alert, get_all_alerts, get_alert_stats, DB_AVAILABLE
 from model_router import choose_model
 
 # ==========================================
@@ -66,7 +66,7 @@ st.title("XFireAlert")
 st.markdown("### Hybrid Forest Fire Prediction & Monitoring System")
 st.markdown("---")
 
-tab1, tab2 = st.tabs(["Fire Monitor Dashboard", "Know Your AI"])
+tab1, tab2, tab3 = st.tabs(["Fire Monitor Dashboard", "Know Your AI", "Alert History"])
 
 with tab1:
     # ==========================================
@@ -332,3 +332,53 @@ with tab2:
     • Weak evidence → Scout (MobileNetV2)
     """)
     st.success("This creates a robust AI decision-support wildfire monitoring system.")
+
+# ==========================================
+# TAB 3: ALERT HISTORY
+# ==========================================
+with tab3:
+    st.header("Alert History & Analytics")
+    st.markdown("---")
+    
+    if not DB_AVAILABLE:
+        st.warning("MongoDB not connected. Configure .env file to enable alert history.")
+        st.code("MONGODB_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/...")
+    else:
+        stats = get_alert_stats()
+        
+        if stats:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Alerts", stats["total_alerts"])
+            with col2:
+                st.metric("High Alerts", stats["high_alerts"], delta="Critical")
+            with col3:
+                st.metric("Moderate Warnings", stats["moderate_alerts"])
+            with col4:
+                st.metric("Low Risk", stats["low_alerts"])
+            
+            st.markdown("---")
+        
+        st.subheader("Recent Alerts")
+        
+        alerts = get_all_alerts(limit=50)
+        
+        if alerts:
+            df = pd.DataFrame(alerts)
+            df = df[["timestamp", "alert_level", "final_probability", "weather_risk", "vision_confidence"]]
+            df.columns = ["Timestamp", "Alert Level", "Final Prob", "Weather Risk", "Vision Conf"]
+            df["Timestamp"] = pd.to_datetime(df["Timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+            
+            def color_alert(val):
+                if val == "HIGH ALERT":
+                    return "background-color: #ff4b4b; color: white"
+                elif val == "MODERATE WARNING":
+                    return "background-color: #ffa500; color: black"
+                elif val == "LOW RISK":
+                    return "background-color: #00ff00; color: black"
+                return ""
+            
+            styled_df = df.style.applymap(color_alert, subset=["Alert Level"])
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No alerts recorded yet. Run an analysis to create your first alert.")
